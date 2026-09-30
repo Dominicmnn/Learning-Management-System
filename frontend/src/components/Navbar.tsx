@@ -24,7 +24,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       case 'ADMIN':
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-            <Shield className="w-3 h-3" /> Institutional Admin
+            <Shield className="w-3 h-3" /> Administrator
           </span>
         );
       case 'INSTRUCTOR':
@@ -36,7 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       case 'STUDENT':
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-900 border border-blue-300">
-            <GraduationCap className="w-3 h-3" /> Enrolled Student
+            <GraduationCap className="w-3 h-3" /> Student
           </span>
         );
       default:

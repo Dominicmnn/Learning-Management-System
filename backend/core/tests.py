@@ -199,6 +199,25 @@ class ShireJamaLmsTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Course.objects.filter(title='Intermediate Somali Grammar').count(), 1)
 
+    def test_course_created_by_instructor_is_listed_for_other_devices(self):
+        self.client.force_authenticate(user=self.instructor)
+        create_response = self.client.post('/api/courses/', {
+            'title': 'Shared Classroom Course',
+            'description': 'Visible to enrolled students on every device',
+            'academicLevels': ['CLASS_1']
+        }, format='json')
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+
+        other_device = APIClient()
+        other_device.force_authenticate(user=self.student)
+        list_response = other_device.get('/api/courses/')
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(list_response.data), 1)
+        self.assertEqual(list_response.data[0]['id'], create_response.data['id'])
+        self.assertEqual(list_response.data[0]['title'], 'Shared Classroom Course')
+        self.assertEqual(list_response.data[0]['chapters'], [])
+
     def test_new_instructor_can_create_course(self):
         new_instructor = User.objects.create_user(
             username='new_instructor',

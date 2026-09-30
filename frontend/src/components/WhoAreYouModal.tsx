@@ -51,7 +51,6 @@ export const WhoAreYouModal: React.FC<WhoAreYouModalProps> = ({
 
     setLoading(true);
 
-    // Try live Django Backend first
     try {
       const { user } = await api.login(identifier.trim(), password);
       if (user.role !== selectedRole && user.role !== 'ADMIN') {
@@ -62,28 +61,9 @@ export const WhoAreYouModal: React.FC<WhoAreYouModalProps> = ({
       onLoginSuccess(user);
       setLoading(false);
       return;
-    } catch {
-      // Fallback to local accounts seamlessly if backend is unreachable
-      const trimmed = identifier.trim().toLowerCase();
-      const matched = users.find(
-        (u) =>
-          u.role === selectedRole &&
-          (u.username.toLowerCase() === trimmed || u.email.toLowerCase() === trimmed)
-      );
-
+    } catch (error) {
       setLoading(false);
-
-      if (!matched) {
-        setErrorMsg(`Invalid credentials. Please verify your username and password.`);
-        return;
-      }
-
-      if (!matched.isActive) {
-        setErrorMsg('This account has been deactivated by the administrator. Please contact school administration.');
-        return;
-      }
-
-      onLoginSuccess(matched);
+      setErrorMsg(error instanceof Error ? error.message : 'Could not sign in. Check your connection and try again.');
     }
   };
 
@@ -127,7 +107,7 @@ export const WhoAreYouModal: React.FC<WhoAreYouModalProps> = ({
                     <GraduationCap className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-slate-900 text-sm">Enrolled Adult Learner / Student</h3>
+                    <h3 className="font-bold text-slate-900 text-sm">Student</h3>
                     <p className="text-xs text-slate-500 mt-0.5">
                       Access your courses, watch lectures, and complete quizzes.
                     </p>
@@ -159,7 +139,7 @@ export const WhoAreYouModal: React.FC<WhoAreYouModalProps> = ({
                     <Shield className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-slate-900 text-sm">Institutional Administrator</h3>
+                    <h3 className="font-bold text-slate-900 text-sm">Administrator</h3>
                     <p className="text-xs text-slate-500 mt-0.5">
                       Provision teacher accounts, manage active user statuses, and view analytics.
                     </p>

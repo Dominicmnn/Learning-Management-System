@@ -362,20 +362,26 @@ class CourseListSerializer(serializers.ModelSerializer):
 
 class QuizAttemptSerializer(serializers.ModelSerializer):
     studentName = serializers.SerializerMethodField()
+    studentId = serializers.IntegerField(source='student_id', read_only=True)
+    quizId = serializers.IntegerField(source='quiz_id', read_only=True)
     quizTitle = serializers.CharField(source='quiz.title', read_only=True)
     courseTitle = serializers.CharField(source='quiz.course.title', read_only=True)
     completedAt = serializers.DateTimeField(source='completed_at', format='%Y-%m-%d %H:%M', read_only=True)
     answerReview = serializers.SerializerMethodField()
     totalQuestions = serializers.IntegerField(source='total_questions')
     resultAvailable = serializers.SerializerMethodField()
+    answers = serializers.JSONField(read_only=True)
 
     class Meta:
         model = QuizAttempt
         fields = [
             'id',
+            'quizId',
+            'studentId',
             'studentName',
             'quizTitle',
             'courseTitle',
+            'answers',
             'score',
             'totalQuestions',
             'percentage',

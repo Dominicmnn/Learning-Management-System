@@ -26,6 +26,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   const [courseTitle, setCourseTitle] = useState('');
   const [courseDesc, setCourseDesc] = useState('');
   const [courseAcademicLevels, setCourseAcademicLevels] = useState<AcademicLevel[]>([]);
+  const [courseError, setCourseError] = useState('');
   const [selectedCourseForUpload, setSelectedCourseForUpload] = useState<string | null>(null);
   const [isCreatingChapter, setIsCreatingChapter] = useState(false);
   const [selectedCourseForChapter, setSelectedCourseForChapter] = useState<string | null>(null);
@@ -83,30 +84,16 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     if (!courseTitle.trim() || courseAcademicLevels.length === 0) return;
 
     try {
-      const newCourse = await api.createCourse(courseTitle.trim(), courseDesc.trim(), courseAcademicLevels, instructor);
+      const newCourse = await api.createCourse(courseTitle.trim(), courseDesc.trim(), courseAcademicLevels);
       onCreateCourse(newCourse);
-    } catch {
-      // Fallback local creation
-      const localCourse: Course = {
-        id: `c-${Date.now()}`,
-        title: courseTitle.trim(),
-        description: courseDesc.trim(),
-        instructorId: instructor.id,
-        instructorName: instructor.fullName,
-        createdAt: new Date().toISOString().split('T')[0],
-        updatedAt: new Date().toISOString().split('T')[0],
-        materials: [],
-        quizzes: [],
-        chapters: [],
-        academicLevels: courseAcademicLevels,
-      };
-      onCreateCourse(localCourse);
+      setCourseError('');
+      setCourseTitle('');
+      setCourseDesc('');
+      setCourseAcademicLevels([]);
+      setIsCreatingCourse(false);
+    } catch (error) {
+      setCourseError(error instanceof Error ? error.message : 'Course could not be saved. Please try again.');
     }
-
-    setCourseTitle('');
-    setCourseDesc('');
-    setCourseAcademicLevels([]);
-    setIsCreatingCourse(false);
   };
 
   const handleMaterialUploadSubmit = async (e: React.FormEvent) => {
@@ -151,31 +138,10 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         });
       }
       setUploadSuccess('Material upload complete.');
-    } catch {
-      // Fallback local memory preview
-      const targetCourse = courses.find((c) => c.id === selectedCourseForUpload);
-      if (targetCourse) {
-        const newMat: LearningMaterial = {
-          id: `m-${Date.now()}`,
-          courseId: selectedCourseForUpload,
-          title: materialTitle.trim(),
-          type: materialType,
-          fileName: selectedFile.name,
-          fileSize: `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB`,
-          fileUrl: URL.createObjectURL(selectedFile),
-          uploadDate: new Date().toISOString().split('T')[0],
-          allowDownload,
-        };
-        onUpdateCourse({
-          ...targetCourse,
-          chapters: targetCourse.chapters.map((chapter) =>
-            chapter.id === selectedChapterId
-              ? { ...chapter, materials: [...chapter.materials, newMat] }
-              : chapter
-          ),
-        });
-      }
-      setUploadSuccess('Material upload complete.');
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Material could not be saved. Please try again.');
+      setUploading(false);
+      return;
     }
 
     setUploading(false);
@@ -302,6 +268,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg p-6 space-y-4">
             <h3 className="text-lg font-bold text-slate-900">Create New Instructional Course</h3>
+            {courseError && <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{courseError}</p>}
             <form onSubmit={handleCreateCourseSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Course Classes and Forms</label>

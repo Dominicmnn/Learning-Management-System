@@ -52,6 +52,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editAcademicLevel, setEditAcademicLevel] = useState<User['academicLevel']>('CLASS_1');
   const [editInstructorCode, setEditInstructorCode] = useState('');
   const [editSuccess, setEditSuccess] = useState('');
+  const [operationError, setOperationError] = useState('');
 
   const instructors = users.filter((u) => u.role === 'INSTRUCTOR');
   const students = users.filter((u) => u.role === 'STUDENT');
@@ -68,26 +69,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         temporaryPassword: tempPass.trim(),
       });
       onAddInstructor(instructor);
-    } catch {
-      // Local fallback
-      const localInstructor: User = {
-        id: `u-inst-${Date.now()}`,
-        username: email.split('@')[0],
-        fullName: fullName.trim(),
-        email: email.trim(),
-        role: 'INSTRUCTOR',
-        isActive: true,
-        dateJoined: new Date().toISOString().split('T')[0],
-        instructorCode: instCode.trim() || `INST-${Math.floor(100 + Math.random() * 900)}`,
-      };
-      onAddInstructor(localInstructor);
+      setOperationError('');
+      setShowAddModal(false);
+      setFullName('');
+      setEmail('');
+      setInstCode('');
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : 'Teacher account could not be saved.');
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
-    setShowAddModal(false);
-    setFullName('');
-    setEmail('');
-    setInstCode('');
   };
 
   const handleAddStudentSubmit = async (e: React.FormEvent) => {
@@ -102,26 +93,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         temporaryPassword: studentPassword,
       });
       onAddStudent(student);
-    } catch {
-      const student: User = {
-        id: `u-std-${Date.now()}`,
-        username: studentEmail.trim().toLowerCase().split('@')[0],
-        fullName: studentFullName.trim(),
-        email: studentEmail.trim().toLowerCase(),
-        role: 'STUDENT',
-        isActive: true,
-        dateJoined: new Date().toISOString().split('T')[0],
-        studentId: `STD-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
-        academicLevel: studentAcademicLevel,
-      };
-      onAddStudent(student);
+      setOperationError('');
+      setShowAddStudentModal(false);
+      setStudentFullName('');
+      setStudentEmail('');
+      setStudentPassword('');
+      setStudentAcademicLevel('');
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : 'Student account could not be saved.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-    setShowAddStudentModal(false);
-    setStudentFullName('');
-    setStudentEmail('');
-    setStudentPassword('');
-    setStudentAcademicLevel('');
   };
 
   const handleToggleStatus = async (user: User) => {
@@ -129,10 +111,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (user.role === 'INSTRUCTOR') {
         await api.adminToggleStatus(user.id);
       }
-    } catch {
-      // Ignore backend error for local mock fallback
+      onToggleUserStatus(user.id);
+      setOperationError('');
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : 'Account status could not be changed.');
     }
-    onToggleUserStatus(user.id);
   };
 
   const handleResetPasswordSubmit = async (e: React.FormEvent) => {
@@ -141,27 +124,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     try {
       await api.adminResetPassword(selectedUserForReset.id, newPassword.trim());
-    } catch {
-      // Local fallback
+      onResetPassword(selectedUserForReset.id, newPassword.trim());
+      setResetSuccess(`Password for ${selectedUserForReset.fullName} has been updated.`);
+      setNewPassword('');
+      setOperationError('');
+      setTimeout(() => {
+        setSelectedUserForReset(null);
+        setResetSuccess('');
+      }, 1200);
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : 'Password could not be reset.');
     }
-
-    onResetPassword(selectedUserForReset.id, newPassword.trim());
-    setResetSuccess(`Password for ${selectedUserForReset.fullName} has been updated.`);
-    setNewPassword('');
-    setTimeout(() => {
-      setSelectedUserForReset(null);
-      setResetSuccess('');
-    }, 1200);
   };
 
   const handleDeleteUser = async (user: User) => {
     if (!window.confirm(`Delete ${user.fullName}'s account permanently? This cannot be undone.`)) return;
     try {
       await api.adminDeleteUser(user.id);
-    } catch {
-      // Local fallback
+      onDeleteUser(user.id);
+      setOperationError('');
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : 'Account could not be deleted.');
     }
-    onDeleteUser(user.id);
   };
 
   const openEditUser = (user: User) => {
@@ -190,15 +174,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     try {
       const savedUser = await api.adminUpdateUser(selectedUserForEdit.id, updatedUser);
       onUpdateUser(savedUser);
-    } catch {
-      onUpdateUser(updatedUser);
+      setOperationError('');
+      setEditSuccess('Account details updated. The new details are now active.');
+      setTimeout(() => setSelectedUserForEdit(null), 1000);
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : 'Account details could not be saved.');
     }
-    setEditSuccess('Account details updated. The new details are now active.');
-    setTimeout(() => setSelectedUserForEdit(null), 1000);
   };
 
   return (
     <div className="space-y-8">
+      {operationError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">{operationError}</p>}
       {/* Banner */}
       <div className="bg-linear-to-r from-emerald-950 to-slate-900 text-white rounded-2xl p-6 sm:p-8 shadow-sm border border-slate-800 flex justify-between items-center">
         <div>

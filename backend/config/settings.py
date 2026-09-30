@@ -3,8 +3,11 @@ from pathlib import Path
 from datetime import timedelta
 
 import dj_database_url
+from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-only-change-this-secret-key')
 
@@ -66,10 +69,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# Use DATABASE_URL on Render and retain SQLite as the local-development fallback.
+DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
+if not DEBUG and not DATABASE_URL:
+    raise ImproperlyConfigured('Set DATABASE_URL to a persistent shared database in production.')
+if not DEBUG and DATABASE_URL.lower().startswith('sqlite:'):
+    raise ImproperlyConfigured('SQLite is not supported for production deployments; use a persistent shared database.')
+
+# Use DATABASE_URL in production and retain SQLite as the local-development fallback.
 DATABASES = {
     'default': dj_database_url.config(
-        default=f'sqlite:///{BASE_DIR / "db.sqlite3"}',
+        default=DATABASE_URL or f'sqlite:///{BASE_DIR / "db.sqlite3"}',
         conn_max_age=600,
         conn_health_checks=True,
     )

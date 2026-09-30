@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { INITIAL_USERS, INITIAL_COURSES_WITH_CHAPTERS, INITIAL_QUIZ_ATTEMPTS } from './data/mockData';
 import { Navbar } from './components/Navbar';
 import { StudentDashboard } from './pages/StudentDashboard';
 import { InstructorDashboard } from './pages/InstructorDashboard';
@@ -7,49 +6,43 @@ import { AdminDashboard } from './pages/AdminDashboard';
 import { SchoolLogo } from './components/SchoolLogo';
 import { api } from './services/api';
 
-const loadStoredUsers = () => {
-  try {
-    const dataVersionKey = 'shire-jama-data-version';
-    if (window.localStorage.getItem(dataVersionKey) !== 'fresh-2026-09') {
-      window.localStorage.removeItem('shire-jama-users');
-      window.localStorage.removeItem('shire-jama-created-quizzes');
-      window.localStorage.removeItem('shire-jama-chapter-progress');
-      window.localStorage.setItem(dataVersionKey, 'fresh-2026-09');
-      return INITIAL_USERS;
-    }
-    const stored = window.localStorage.getItem('shire-jama-users');
-    return stored ? JSON.parse(stored) : INITIAL_USERS;
-  } catch {
-    return INITIAL_USERS;
-  }
-};
-
 export default function App() {
-  const [users, setUsers] = useState(loadStoredUsers);
-  const [courses, setCourses] = useState(INITIAL_COURSES_WITH_CHAPTERS);
-  const [attempts, setAttempts] = useState(INITIAL_QUIZ_ATTEMPTS);
+  const [users, setUsers] = useState([]);
+  const [courses, setCourses] = useState([]);
+  const [attempts, setAttempts] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
+  const [loadError, setLoadError] = useState('');
 
-  // Load the initial course snapshot once. Subsequent edits stay in shared app state.
+  const loadAccountData = async (user) => {
+    setLoadError('');
+    try {
+      const [liveCourses, liveAttempts] = await Promise.all([api.getCourses(), api.getQuizAttempts()]);
+      setCourses(liveCourses);
+      setAttempts(liveAttempts);
+      setUsers(user.role === 'ADMIN' ? await api.getUsers() : []);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Could not load records from the server.');
+    }
+  };
+
   useEffect(() => {
-    async function loadData() {
-      setCourses([]);
-      setAttempts([]);
+    async function restoreSession() {
+      if (!api.hasSession()) return;
       try {
-        const liveCourses = await api.getCourses();
-        if (liveCourses && liveCourses.length > 0) {
-          setCourses(liveCourses);
-        }
+        const user = await api.getCurrentUser();
+        setCurrentUser(user);
+        await loadAccountData(user);
       } catch {
-        // Seamless fallback to local default courses
+        await api.clearTokens();
       }
     }
-    loadData();
+    restoreSession();
   }, []);
 
   // Authentication Handlers
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
+    loadAccountData(user);
   };
 
   const handleLogout = () => {
@@ -88,7 +81,6 @@ export default function App() {
   const handleAddStudent = (newStudent) => {
     setUsers((prev) => {
       const updated = [...prev, newStudent];
-      window.localStorage.setItem('shire-jama-users', JSON.stringify(updated));
       return updated;
     });
   };
@@ -96,7 +88,6 @@ export default function App() {
   const handleUpdateUser = (updatedUser) => {
     setUsers((prev) => {
       const updated = prev.map((user) => (user.id === updatedUser.id ? updatedUser : user));
-      window.localStorage.setItem('shire-jama-users', JSON.stringify(updated));
       return updated;
     });
     setCurrentUser((current) => current?.id === updatedUser.id ? updatedUser : current);
@@ -115,7 +106,6 @@ export default function App() {
   const handleDeleteUser = (userId) => {
     setUsers((prev) => {
       const updated = prev.filter((user) => user.id !== userId);
-      window.localStorage.setItem('shire-jama-users', JSON.stringify(updated));
       return updated;
     });
   };
@@ -140,6 +130,7 @@ export default function App() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {loadError && <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">{loadError}</p>}
         {!currentUser && (
           <div className="text-center py-16 px-4 bg-white rounded-2xl shadow-sm border border-slate-200 mt-4">
             <div className="flex justify-center mb-6">

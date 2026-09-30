@@ -1,157 +1,232 @@
-import { AcademicLevel, Course, Quiz, QuizAttempt, User } from '../types';
-import { Chapter } from '../types';
-import { INITIAL_USERS, INITIAL_COURSES_WITH_CHAPTERS } from '../data/mockData';
+import { AcademicLevel, Chapter, Course, Quiz, QuizAttempt, User } from '../types';
 
 const tokenStorageKey = 'shire-jama-auth-tokens';
-const progressStorageKey = 'shire-jama-chapter-progress';
-const usersStorageKey = 'shire-jama-users';
-const createdQuizzesStorageKey = 'shire-jama-created-quizzes';
+const apiBaseUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '');
 
-const getCreatedQuizzes = (): Quiz[] => {
-  if (typeof window === 'undefined') return [];
+type ApiTokens = { access: string; refresh: string };
+type ApiUser = {
+  id: number | string;
+  username: string;
+  email: string;
+  fullName?: string;
+  role: User['role'];
+  student_id?: string | null;
+  instructor_code?: string | null;
+  academicLevel?: AcademicLevel | null;
+  academic_level?: AcademicLevel | null;
+  is_active?: boolean;
+  isActive?: boolean;
+  date_joined?: string;
+  dateJoined?: string;
+};
+
+const readTokens = (): ApiTokens | null => {
+  if (typeof window === 'undefined') return null;
   try {
-    return JSON.parse(window.localStorage.getItem(createdQuizzesStorageKey) || '[]');
+    return JSON.parse(window.localStorage.getItem(tokenStorageKey) || 'null') as ApiTokens | null;
   } catch {
-    return [];
+    return null;
   }
 };
 
-const getStoredUsers = (): User[] => {
-  if (typeof window === 'undefined') return INITIAL_USERS;
-  try {
-    const stored = window.localStorage.getItem(usersStorageKey);
-    return stored ? JSON.parse(stored) : INITIAL_USERS;
-  } catch {
-    return INITIAL_USERS;
-  }
+const saveTokens = (tokens: ApiTokens) => {
+  window.localStorage.setItem(tokenStorageKey, JSON.stringify(tokens));
 };
 
-const storeUsers = (users: User[]) => {
-  if (typeof window !== 'undefined') window.localStorage.setItem(usersStorageKey, JSON.stringify(users));
-};
+const toUser = (user: ApiUser): User => ({
+  id: String(user.id),
+  username: user.username,
+  fullName: user.fullName || user.username,
+  email: user.email,
+  role: user.role,
+  isActive: user.is_active ?? user.isActive ?? true,
+  dateJoined: user.date_joined || user.dateJoined || '',
+  studentId: user.student_id || undefined,
+  instructorCode: user.instructor_code || undefined,
+  academicLevel: user.academicLevel || user.academic_level || undefined,
+});
 
-const cloneCourses = (): Course[] => INITIAL_COURSES_WITH_CHAPTERS.map((course) => ({
-  ...course,
-  materials: course.materials.map((material) => ({ ...material })),
-  quizzes: course.quizzes.map((quiz) => ({
-    ...quiz,
-    questions: quiz.questions.map((question) => ({
-      ...question,
-      choices: question.choices.map((choice) => ({ ...choice })),
-    })),
+const mapQuiz = (quiz: Record<string, any>, courseId: string): Quiz => ({
+  ...quiz,
+  id: String(quiz.id),
+  courseId,
+  chapterId: quiz.chapterId == null ? undefined : String(quiz.chapterId),
+  questions: (quiz.questions || []).map((question: Record<string, any>) => ({
+    ...question,
+    id: String(question.id),
+    questionFileUrl: question.questionFile || question.questionFileUrl || undefined,
+    choices: (question.choices || []).map((choice: Record<string, any>) => ({ ...choice, id: String(choice.id) })),
   })),
-  chapters: course.chapters.map((chapter) => ({
-    ...chapter,
-    materials: chapter.materials.map((material) => ({ ...material })),
-    quizzes: chapter.quizzes.map((quiz) => ({ ...quiz, questions: quiz.questions.map((question) => ({ ...question, choices: question.choices.map((choice) => ({ ...choice })) })) })),
-  })),
-}));
+});
 
-const findUserByCredentials = (identifier: string, password: string) => {
-  const normalized = identifier.trim().toLowerCase();
-  return getStoredUsers().find((user) => {
-    const matchesLogin = user.username.toLowerCase() === normalized || user.email.toLowerCase() === normalized;
-    const matchesPassword =
-      (user.role === 'ADMIN' && password === 'Admin2024!') ||
-      (user.role === 'INSTRUCTOR' && password === 'Instructor2024!') ||
-      (user.role === 'STUDENT' && password === 'Student2024!') ||
-      password === 'ShireJama2024!';
-
-    return matchesLogin && matchesPassword && user.isActive;
+const mapCourse = (course: Record<string, any>): Course => {
+  const courseId = String(course.id);
+  const mapMaterial = (material: Record<string, any>) => ({
+    ...material,
+    id: String(material.id),
+    courseId,
+    chapterId: material.chapterId == null ? undefined : String(material.chapterId),
+    fileName: material.fileName || material.fileUrl?.split('/').pop() || '',
+    fileSize: material.fileSize || '',
   });
+  return {
+    ...course,
+    id: courseId,
+    instructorId: String(course.instructorId),
+    materials: (course.materials || []).map(mapMaterial),
+    quizzes: (course.quizzes || []).map((quiz: Record<string, any>) => mapQuiz(quiz, courseId)),
+    chapters: (course.chapters || []).map((chapter: Record<string, any>) => ({
+      ...chapter,
+      id: String(chapter.id),
+      courseId,
+      materials: (chapter.materials || []).map(mapMaterial),
+      quizzes: (chapter.quizzes || []).map((quiz: Record<string, any>) => mapQuiz(quiz, courseId)),
+    })),
+  } as Course;
 };
 
-const ensureTokens = () => {
-  if (typeof window === 'undefined') return;
-  const existing = window.localStorage.getItem(tokenStorageKey);
-  if (!existing) {
-    window.localStorage.setItem(tokenStorageKey, JSON.stringify({ access: 'demo-token', refresh: 'demo-refresh-token' }));
+const apiRequest = async <T>(path: string, options: RequestInit = {}, allowRefresh = true): Promise<T> => {
+  const tokens = readTokens();
+  const headers = new Headers(options.headers);
+  if (tokens?.access) headers.set('Authorization', `Bearer ${tokens.access}`);
+  if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
   }
+
+  let response = await fetch(`${apiBaseUrl}${path}`, { ...options, headers });
+  if (response.status === 401 && allowRefresh && tokens?.refresh && path !== '/auth/token/refresh/') {
+    const refreshResponse = await fetch(`${apiBaseUrl}/auth/token/refresh/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh: tokens.refresh }),
+    });
+    if (refreshResponse.ok) {
+      const refreshed = await refreshResponse.json() as Partial<ApiTokens>;
+      if (refreshed.access) {
+        saveTokens({ access: refreshed.access, refresh: refreshed.refresh || tokens.refresh });
+        return apiRequest<T>(path, options, false);
+      }
+    }
+    window.localStorage.removeItem(tokenStorageKey);
+  }
+
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`;
+    try {
+      const body = await response.json();
+      message = body.detail || body.message || Object.values(body).flat().join(' ') || message;
+    } catch {
+      // Keep the status-based message for non-JSON responses.
+    }
+    throw new Error(String(message));
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
 };
+
+const mapAttempt = (attempt: Record<string, any>): QuizAttempt => ({
+  id: String(attempt.id),
+  quizId: String(attempt.quizId),
+  quizTitle: attempt.quizTitle,
+  courseTitle: attempt.courseTitle,
+  studentId: String(attempt.studentId),
+  studentName: attempt.studentName,
+  score: attempt.score,
+  totalQuestions: attempt.totalQuestions,
+  percentage: attempt.percentage,
+  completedAt: attempt.completedAt,
+  answers: attempt.answers || {},
+  resultAvailable: attempt.resultAvailable,
+  answerReview: attempt.answerReview?.map((entry: Record<string, any>) => ({
+    questionId: String(entry.questionId),
+    question: entry.question,
+    questionType: entry.questionType,
+    selectedAnswer: entry.selectedAnswer,
+    correctAnswer: entry.correctAnswer,
+    isCorrect: entry.isCorrect,
+    answerFile: entry.answerFile,
+  })),
+});
 
 export const api = {
+  hasSession: () => Boolean(readTokens()?.access || readTokens()?.refresh),
+
   clearTokens: async () => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(tokenStorageKey);
-    }
-    return Promise.resolve();
+    window.localStorage.removeItem(tokenStorageKey);
   },
 
-  getCourses: async (): Promise<Course[]> => {
-    ensureTokens();
-    return Promise.resolve(cloneCourses());
+  getCourses: async (): Promise<Course[]> => (await apiRequest<Record<string, any>[]>('/courses/')).map(mapCourse),
+
+  getQuizAttempts: async (): Promise<QuizAttempt[]> => {
+    const attempts = await apiRequest<Record<string, any>[]>('/quiz-results/');
+    return attempts.map(mapAttempt);
+  },
+
+  getUsers: async (): Promise<User[]> => {
+    const [instructors, students] = await Promise.all([
+      apiRequest<ApiUser[]>('/admin/instructors/'),
+      apiRequest<ApiUser[]>('/admin/students/'),
+    ]);
+    return [
+      ...instructors.map((user) => toUser({ ...user, role: 'INSTRUCTOR' })),
+      ...students.map((user) => toUser({ ...user, role: 'STUDENT' })),
+    ];
   },
 
   login: async (identifier: string, password: string) => {
-    ensureTokens();
-    const matchedUser = findUserByCredentials(identifier, password);
-    if (!matchedUser) {
-      return Promise.reject(new Error('Invalid credentials'));
-    }
-    return Promise.resolve({ user: matchedUser, accessToken: 'demo-token', refreshToken: 'demo-refresh-token' });
+    const result = await apiRequest<{ access: string; refresh: string; user: ApiUser }>('/auth/login/', {
+      method: 'POST',
+      body: JSON.stringify({ username: identifier.trim(), password }),
+    });
+    saveTokens({ access: result.access, refresh: result.refresh });
+    return { user: toUser(result.user), accessToken: result.access, refreshToken: result.refresh };
   },
+
+  getCurrentUser: async (): Promise<User> => toUser(await apiRequest<ApiUser>('/auth/me/')),
 
   adminProvisionStudent: async (payload: { fullName: string; email: string; academicLevel: AcademicLevel; temporaryPassword: string }) => {
-    ensureTokens();
-    const emailTrimmed = payload.email.trim().toLowerCase();
-    const storedUsers = getStoredUsers();
-    const existing = storedUsers.find((user) => user.email.toLowerCase() === emailTrimmed);
-    if (existing) return Promise.reject(new Error('User already exists'));
-
-    const newStudent: User = {
-      id: `u-std-${Date.now()}`,
-      username: emailTrimmed.split('@')[0],
-      fullName: payload.fullName.trim(),
-      email: emailTrimmed,
-      role: 'STUDENT',
-      isActive: true,
-      dateJoined: new Date().toISOString().split('T')[0],
-      studentId: `STD-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
-      academicLevel: payload.academicLevel,
-    };
-
-    storeUsers([...storedUsers, newStudent]);
-    return Promise.resolve(newStudent);
+    const result = await apiRequest<{ student: ApiUser }>('/admin/students/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return toUser(result.student);
   },
 
-  createCourse: async (title: string, description: string, academicLevels: AcademicLevel[], instructor: User) => {
-    ensureTokens();
-    const newCourse: Course = {
-      id: `c-${Date.now()}`,
-      title: title.trim(),
-      description: description.trim(),
-      instructorId: instructor.id,
-      instructorName: instructor.fullName,
-      createdAt: new Date().toISOString().split('T')[0],
-      updatedAt: new Date().toISOString().split('T')[0],
-      materials: [],
-      quizzes: [],
-      chapters: [],
-      academicLevels,
-    };
-    return Promise.resolve(newCourse);
-  },
+  createCourse: async (title: string, description: string, academicLevels: AcademicLevel[]) =>
+    mapCourse(await apiRequest<Record<string, any>>('/courses/', {
+      method: 'POST',
+      body: JSON.stringify({ title, description, academicLevels }),
+    })),
+
+  updateCourse: async (course: Course): Promise<Course> => mapCourse(await apiRequest<Record<string, any>>(`/courses/${course.id}/`, {
+    method: 'PUT',
+    body: JSON.stringify({ title: course.title, description: course.description, academicLevels: course.academicLevels }),
+  })),
+
+  deleteCourse: async (courseId: string) => apiRequest<void>(`/courses/${courseId}/`, { method: 'DELETE' }),
 
   uploadMaterial: async (courseId: string, formData: FormData) => {
-    ensureTokens();
-    const title = String(formData.get('title') ?? 'Uploaded material');
+    const result = await apiRequest<Record<string, any>>(`/courses/${courseId}/materials/`, { method: 'POST', body: formData });
     const file = formData.get('file');
-    const fileUrl = typeof file === 'string' ? file : `https://example.com/${title.replace(/\s+/g, '-').toLowerCase()}`;
-    return Promise.resolve({
-      id: `m-${Date.now()}`,
+    return {
+      ...result,
+      id: String(result.id),
       courseId,
-      title,
-      type: String(formData.get('type') ?? 'PDF'),
-      fileName: file && typeof file !== 'string' ? (file as File).name : 'uploaded-file',
-      fileUrl,
-      chapterId: String(formData.get('chapterId') ?? ''),
-      allowDownload: String(formData.get('allowDownload') ?? 'false') === 'true',
-    });
+      type: result.type,
+      fileName: file instanceof File ? file.name : '',
+      fileSize: result.fileSize,
+      fileUrl: result.fileUrl,
+      uploadDate: result.uploadDate,
+      chapterId: String(result.chapterId || ''),
+    };
   },
 
   createChapter: async (courseId: string, title: string): Promise<Chapter> => {
-    ensureTokens();
-    return Promise.resolve({ id: `ch-${Date.now()}`, courseId, title: title.trim(), order: Date.now(), materials: [], quizzes: [] });
+    const chapter = await apiRequest<Omit<Chapter, 'courseId'>>(`/courses/${courseId}/chapters/`, {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    });
+    return { ...chapter, id: String(chapter.id), courseId, materials: chapter.materials || [], quizzes: chapter.quizzes || [] };
   },
 
   createQuiz: async (
@@ -160,111 +235,114 @@ export const api = {
     title: string,
     isTimed: boolean,
     timeLimitMinutes?: number,
-    questions: Quiz['questions'] = [],
+    questions: Array<{ prompt: string; questionType?: string; questionFile?: File; choices: Array<{ text: string; isCorrect?: boolean }> }> = [],
     resultsVisibleToStudents = false,
     opensAt: string | null = null,
     closesAt: string | null = null,
   ): Promise<Quiz> => {
-    ensureTokens();
-    const quiz = { id: `q-${Date.now()}`, courseId, chapterId, title: title.trim(), instructions: '', passingScorePercent: 70, resultsVisibleToStudents, questions, isTimed, timeLimitMinutes: isTimed ? timeLimitMinutes : null, opensAt, closesAt };
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(createdQuizzesStorageKey, JSON.stringify([...getCreatedQuizzes(), quiz]));
-    }
-    return Promise.resolve(quiz);
+    const formData = new FormData();
+    formData.append('title', title.trim());
+    formData.append('chapterId', chapterId);
+    formData.append('isTimed', String(isTimed));
+    if (isTimed && timeLimitMinutes) formData.append('timeLimitMinutes', String(timeLimitMinutes));
+    formData.append('resultsVisibleToStudents', String(resultsVisibleToStudents));
+    if (opensAt) formData.append('opensAt', opensAt);
+    if (closesAt) formData.append('closesAt', closesAt);
+    formData.append('questions', JSON.stringify(questions.map((question, index) => {
+      if (question.questionFile) formData.append(`questionFile_${index}`, question.questionFile);
+      return {
+        prompt: question.prompt,
+        questionType: question.questionType || 'MULTIPLE_CHOICE',
+        choices: question.choices,
+      };
+    })));
+    const quiz = await apiRequest<Quiz>(`/courses/${courseId}/quizzes/`, { method: 'POST', body: formData });
+    return { ...quiz, id: String(quiz.id), courseId, chapterId: String(quiz.chapterId || chapterId) };
   },
 
-  completeChapter: async (courseId: string, chapterId: string) => {
-    ensureTokens();
-    if (typeof window !== 'undefined') {
-      const progress = JSON.parse(window.localStorage.getItem(progressStorageKey) || '{}');
-      progress[`${courseId}:${chapterId}`] = true;
-      window.localStorage.setItem(progressStorageKey, JSON.stringify(progress));
-    }
-    return Promise.resolve({ chapterId, completed: true });
-  },
-
-  submitQuiz: async (quizId: string, answers: Record<string, string>, answerFiles: Record<string, File> = {}) => {
-    ensureTokens();
-    const seededQuiz = INITIAL_COURSES_WITH_CHAPTERS.flatMap((entry) => entry.quizzes).find((quiz) => quiz.id === quizId);
-    const quiz = seededQuiz || getCreatedQuizzes().find((entry) => entry.id === quizId);
-    const totalQuestions = quiz?.questions.length ?? 0;
-    let correct = 0;
-
-    quiz?.questions.forEach((question) => {
-      const selected = answers[question.id];
-      const correctChoice = question.choices.find((choice) => choice.isCorrect);
-      if (selected && correctChoice && selected === correctChoice.id) {
-        correct += 1;
-      }
-    });
-
-    const hasDocumentQuestions = Boolean(quiz?.questions.some((question) => question.questionType === 'DOCUMENT'));
-    const percentage = hasDocumentQuestions ? null : (totalQuestions > 0 ? Math.round((correct / totalQuestions) * 100) : 0);
-    return Promise.resolve({
-      attemptId: `att-${Date.now()}`,
-      resultAvailable: quiz?.resultsVisibleToStudents === true && !hasDocumentQuestions,
-      score: hasDocumentQuestions ? null : correct,
-      totalQuestions,
-      percentage,
-      completedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
-      answerFiles: Object.fromEntries(Object.entries(answerFiles).map(([questionId, file]) => [questionId, URL.createObjectURL(file)])),
-    });
-  },
-
-  gradeAttempt: async (attempt: QuizAttempt, score?: number, percentage?: number) => Promise.resolve({
-    ...attempt,
-    score: score ?? (attempt.totalQuestions ? Math.round(((percentage ?? 0) / 100) * attempt.totalQuestions) : 0),
-    percentage: percentage ?? (attempt.totalQuestions ? Math.round(((score ?? 0) / attempt.totalQuestions) * 100) : 0),
-    resultAvailable: true,
+  completeChapter: async (courseId: string, chapterId: string) => apiRequest<{ chapterId: string; completed: boolean }>(`/courses/${courseId}/progress/`, {
+    method: 'POST',
+    body: JSON.stringify({ chapterId }),
   }),
 
-  releaseQuizResults: async (quizId: string) => {
-    const quizzes = getCreatedQuizzes().map((quiz) => String(quiz.id) === String(quizId)
-      ? { ...quiz, resultsVisibleToStudents: true }
-      : quiz);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(createdQuizzesStorageKey, JSON.stringify(quizzes));
-    }
-    return Promise.resolve({ quizId, resultsVisibleToStudents: true });
+  getCourseProgress: async (courseId: string) => apiRequest<{ completedChapterIds: number[] }>(`/courses/${courseId}/progress/`),
+
+  submitQuiz: async (
+    quizId: string,
+    answers: Record<string, string>,
+    answerFiles: Record<string, File> = {},
+  ): Promise<{
+    attemptId?: string | number;
+    totalQuestions: number;
+    score: number | null;
+    percentage: number | null;
+    completedAt?: string;
+    resultAvailable?: boolean;
+    passed?: boolean;
+  }> => {
+    const formData = new FormData();
+    formData.append('answers', JSON.stringify(answers));
+    Object.entries(answerFiles).forEach(([questionId, file]) => formData.append(`answerFile_${questionId}`, file));
+    const result = await apiRequest<Record<string, any>>(`/quizzes/${quizId}/submit/`, { method: 'POST', body: formData });
+    return {
+      attemptId: result.attemptId,
+      totalQuestions: result.totalQuestions ?? 0,
+      score: result.score ?? null,
+      percentage: result.percentage ?? null,
+      completedAt: result.completedAt,
+      resultAvailable: result.resultAvailable,
+      passed: result.passed,
+    };
   },
+
+  gradeAttempt: async (attempt: QuizAttempt, score?: number, percentage?: number) => {
+    const graded = await apiRequest<Record<string, any>>(`/quiz-attempts/${attempt.id}/grade/`, {
+      method: 'POST',
+      body: JSON.stringify({ score, percentage }),
+    });
+    return { ...attempt, ...mapAttempt({ ...graded, quizId: attempt.quizId, studentId: attempt.studentId }), resultAvailable: true };
+  },
+
+  releaseQuizResults: async (quizId: string) => apiRequest<{ quizId: string; resultsVisibleToStudents: boolean }>(`/quizzes/${quizId}/release-results/`, { method: 'POST' }),
 
   adminProvisionInstructor: async (payload: { fullName: string; email: string; instructorCode?: string; temporaryPassword: string }) => {
-    ensureTokens();
-    const newInstructor: User = {
-      id: `u-inst-${Date.now()}`,
-      username: payload.email.split('@')[0],
-      fullName: payload.fullName.trim(),
-      email: payload.email.trim().toLowerCase(),
-      role: 'INSTRUCTOR',
-      isActive: true,
-      dateJoined: new Date().toISOString().split('T')[0],
-      instructorCode: payload.instructorCode || `INST-${Math.floor(100 + Math.random() * 900)}`,
-    };
-    return Promise.resolve(newInstructor);
+    const result = await apiRequest<{ instructor: ApiUser }>('/admin/instructors/', {
+      method: 'POST',
+      body: JSON.stringify({
+        fullName: payload.fullName,
+        email: payload.email,
+        username: payload.email.trim().toLowerCase().split('@')[0],
+        instructor_code: payload.instructorCode || '',
+        temporaryPassword: payload.temporaryPassword,
+      }),
+    });
+    return toUser({ ...result.instructor, role: 'INSTRUCTOR' });
   },
 
-  adminToggleStatus: async (userId: string) => {
-    ensureTokens();
-    return Promise.resolve({ userId, isActive: true });
-  },
+  adminToggleStatus: async (userId: string) => apiRequest<{ isActive: boolean }>(`/admin/instructors/${userId}/toggle-status/`, { method: 'POST' }),
 
-  adminResetPassword: async (userId: string, newPassword: string) => {
-    ensureTokens();
-    return Promise.resolve({ userId, newPassword });
-  },
+  adminResetPassword: async (userId: string, newPassword: string) => apiRequest<void>(`/admin/users/${userId}/reset-password/`, {
+    method: 'POST',
+    body: JSON.stringify({ newPassword }),
+  }),
 
   adminUpdateUser: async (userId: string, user: User): Promise<User> => {
-    ensureTokens();
-    const updatedUser = { ...user, id: userId };
-    storeUsers(getStoredUsers().map((storedUser) => storedUser.id === userId ? updatedUser : storedUser));
-    return Promise.resolve(updatedUser);
+    const updated = await apiRequest<ApiUser>(`/admin/users/${userId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        fullName: user.fullName,
+        username: user.username,
+        email: user.email,
+        studentId: user.studentId,
+        instructorCode: user.instructorCode,
+        academicLevel: user.academicLevel,
+        isActive: user.isActive,
+      }),
+    });
+    return toUser(updated);
   },
 
-  adminDeleteUser: async (userId: string) => {
-    ensureTokens();
-    storeUsers(getStoredUsers().filter((user) => user.id !== userId));
-    return Promise.resolve({ userId });
-  },
+  adminDeleteUser: async (userId: string) => apiRequest<void>(`/admin/users/${userId}/delete/`, { method: 'DELETE' }),
 };
 
 export default api;

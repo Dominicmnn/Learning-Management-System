@@ -23,6 +23,7 @@ export const QuizModal: React.FC<QuizModalProps> = ({
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [attemptResult, setAttemptResult] = useState<QuizAttempt | null>(null);
   const [secondsLeft, setSecondsLeft] = useState((quiz?.timeLimitMinutes ?? 0) * 60);
+  const [submitError, setSubmitError] = useState('');
 
   useEffect(() => {
     if (!quiz?.isTimed || attemptResult || secondsLeft <= 0) return undefined;
@@ -55,11 +56,11 @@ export const QuizModal: React.FC<QuizModalProps> = ({
       };
     });
 
-    // Try backend evaluation first
     try {
       const res = await api.submitQuiz(quiz.id, selectedAnswers, answerFiles);
+      const attemptId = res.attemptId != null ? String(res.attemptId) : `${quiz.id}-${Date.now()}`;
       const attempt: QuizAttempt = {
-        id: `att-${res.attemptId || Date.now()}`,
+        id: attemptId,
         quizId: quiz.id,
         quizTitle: quiz.title,
         courseTitle,
@@ -71,48 +72,16 @@ export const QuizModal: React.FC<QuizModalProps> = ({
         answerFiles: Object.fromEntries(Object.entries(answerFiles).map(([questionId, file]) => [questionId, file.name])),
         completedAt: res.completedAt || new Date().toLocaleString(),
         answers: selectedAnswers,
-        resultAvailable: res.resultAvailable !== false,
+        resultAvailable: res.resultAvailable ?? true,
         answerReview,
       };
       setAttemptResult(attempt);
       onSubmitAttempt(attempt);
       setIsSubmitted(true);
-      setIsSubmitting(false);
-      return;
-    } catch {
-      // Fallback local evaluation if offline
-      let correct = 0;
-      quiz.questions.forEach((q) => {
-        const picked = selectedAnswers[q.id];
-        const correctChoice = q.choices.find((c) => c.isCorrect);
-        if (correctChoice && picked === correctChoice.id) {
-          correct += 1;
-        }
-      });
-
-      const total = quiz.questions.length;
-      const pct = total > 0 ? Math.round((correct / total) * 100) : 0;
-
-      const attempt: QuizAttempt = {
-        id: `att-${Date.now()}`,
-        quizId: quiz.id,
-        quizTitle: quiz.title,
-        courseTitle,
-        studentId: student.id,
-        studentName: student.fullName,
-        score: quiz.questions.some((question) => question.questionType === 'DOCUMENT') ? null : correct,
-        totalQuestions: total,
-        percentage: quiz.questions.some((question) => question.questionType === 'DOCUMENT') ? null : pct,
-        completedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
-        answers: selectedAnswers,
-        resultAvailable: quiz.resultsVisibleToStudents === true,
-        answerReview,
-        answerFiles: Object.fromEntries(Object.entries(answerFiles).map(([questionId, file]) => [questionId, file.name])),
-      };
-
-      setAttemptResult(attempt);
-      onSubmitAttempt(attempt);
-      setIsSubmitted(true);
+      setSubmitError('');
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Your assessment could not be saved. Please try again.');
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -145,6 +114,7 @@ export const QuizModal: React.FC<QuizModalProps> = ({
         <div className="p-6 overflow-y-auto max-h-[70vh] space-y-6">
           {!isSubmitted ? (
             <>
+              {submitError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">{submitError}</p>}
               {quiz.instructions && (
                 <div className="bg-blue-50 border border-blue-200 text-blue-900 px-4 py-3 rounded-lg text-sm">
                   {quiz.instructions}

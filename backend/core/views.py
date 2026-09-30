@@ -43,10 +43,16 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     Login endpoint. Returns JWT tokens along with institutional role and profile details.
     """
     def post(self, request, *args, **kwargs):
+        identifier = request.data.get('username', '')
+        user = User.objects.filter(username__iexact=identifier).first()
+        if not user and '@' in identifier:
+            user = User.objects.filter(email__iexact=identifier).first()
+        if user:
+            request._full_data = request.data.copy()
+            request._full_data['username'] = user.username
+
         response = super().post(request, *args, **kwargs)
         if response.status_code == 200:
-            username = request.data.get('username')
-            user = User.objects.filter(username=username).first()
             if user:
                 if not user.is_active:
                     return Response(
@@ -91,7 +97,7 @@ class CourseListView(APIView):
         else:
             courses = Course.objects.all()
 
-        serializer = CourseListSerializer(courses, many=True)
+        serializer = CourseDetailSerializer(courses, many=True, context={'request': request})
         return Response(serializer.data)
 
     def post(self, request):
@@ -640,6 +646,10 @@ class AdminInstructorManagementView(APIView):
 class AdminStudentManagementView(APIView):
     """Allows administrators to provision student accounts."""
     permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
+
+    def get(self, request):
+        students = User.objects.filter(role=User.Role.STUDENT).order_by('-date_joined')
+        return Response(UserProfileSerializer(students, many=True).data)
 
     def post(self, request):
         serializer = AdminCreateStudentSerializer(data=request.data)

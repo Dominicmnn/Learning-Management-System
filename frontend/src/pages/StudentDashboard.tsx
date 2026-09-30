@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Chapter, Course, LearningMaterial, Quiz, QuizAttempt, User } from '../types';
 import { api } from '../services/api';
 import { PdfViewerModal } from '../components/PdfViewerModal';
@@ -22,9 +22,20 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [activePdf, setActivePdf] = useState<LearningMaterial | null>(null);
   const [activeVideo, setActiveVideo] = useState<LearningMaterial | null>(null);
   const [activeQuiz, setActiveQuiz] = useState<{ quiz: Quiz; courseTitle: string } | null>(null);
-  const [completedChapters, setCompletedChapters] = useState<Record<string, boolean>>(() => {
-    try { return JSON.parse(window.localStorage.getItem('shire-jama-chapter-progress') || '{}'); } catch { return {}; }
-  });
+  const [completedChapters, setCompletedChapters] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(courses.map(async (course) => {
+      const progress = await api.getCourseProgress(course.id);
+      return progress.completedChapterIds.map((chapterId) => `${course.id}:${chapterId}`);
+    })).then((completedKeys) => {
+      if (!cancelled) setCompletedChapters(Object.fromEntries(completedKeys.flat().map((key) => [key, true])));
+    }).catch(() => {
+      if (!cancelled) setCompletedChapters({});
+    });
+    return () => { cancelled = true; };
+  }, [courses]);
 
   const studentAttempts = attempts.filter((a) => a.studentId === student.id || a.studentName === student.fullName);
   const markChapterDone = async (course: Course, chapter: Chapter) => {
